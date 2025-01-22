@@ -1,41 +1,27 @@
-# trakt-mpv
+# trakt-scrobble
 
 A MPV script that checks in your movies and shows with Trakt.tv without the need for an IPC server.
 
 | ![mpv_screenshot](imgs/mpv_screenshot.jpg) | ![mpv_screenshot](imgs/trakt_screenshot.jpg) |
 | ------------------------------------------ | -------------------------------------------- |
 
-## Archival Notice
-
-**As you can see this repository has been archived. I've archived it since I've beeen busy lately and haven't really used mpv.net for a while. The code stills works perfectly and will scrobble on trakt.tv, however, I'm unable to dedicate more time to this project ðŸ˜”.**
-
-## How does it work?
-
-This script is written in both Lua and Python. The Lua part works as a front-end while the Python script is responsible for communicating with Trakt.tv.
-
-This dual-language approach was needed since mpv scripts aren't able to send http requests and/or edit files natively.
+**Requires curl**
 
 ## How to install?
 
-### Pre-requisites
-
-In order for this script to work you need to make sure you have Python 3 installed.
-
-After that, make sure you also have the `requests` module. You can install it like this:
-
-```
-pip install requests
-```
 
 ### Installing
 
 The install is pretty simple and can be done with the following steps:
 
-1. Move **trakt-mpv.lua** and **trakt-mpv** folder to your scripts folder
-   - *NOTE: If you are on Windows it will automatically assume that you are using mpv.net with the configuration in APPDATA. If you aren't please change it in the lua script `evoque_python` function.*
+1. Clone the entire project into the mpv's scripts folder
+   - To do it in one command:
+     ```
+	   git clone 'https://github.com/dyphire/trakt-scrobble' ~/.config/mpv/scripts/trakt-scrobble
+	
 2. Create a trakt.tv api. You can do this using: [https://trakt.tv/oauth/applications](https://trakt.tv/oauth/applications)
-3. Copy your **client_id** and **client_secret** to **trakt-mpv/config_example.json**
-4. Rename **trakt-mpv/config_example.json** to **trakt-mpv/config.json**
+3. Copy your **client_id** and **client_secret** to **trakt-scrobble/config_example.json**
+4. Rename **trakt-scrobble/config_example.json** to **trakt-scrobble/config.json**
 
 Ok the hard part is done, now you'll do the rest in mpv. If you did everything correctly when you open a file the following message will appear: 
 
@@ -48,7 +34,7 @@ Press X and follow the instructions on the screen. After that you are all set ðŸ
 The current behaviors adopted by the plugin are:
 
  - It will start a scrobble as soon as the video starts.
- - If you starting watching something while trakt.tv is still scrobbing, it will stop the scrobble, count it as seen and start scrobbing the current file (independently of how much you watched the previous one).
+ - The scrobble will stop when playback is paused or ended.
  - Right now there really isn't a good error reporting. So if you find an error I suggest you look at the mpv console.
 
 ## Improvements
@@ -58,7 +44,6 @@ Some improvements that can be done are:
 - [ ] Start scrobbing only after x seconds of playback. This would avoid acidental scrobbles.
 - [ ] Allow the user to cancel a scrobble.
 - [ ] Allow a backup plan for when the show/movie isn't recognized.
-- [ ] Test in platforms other than Windows and mpv.net.
 
 ## Contributing
 
