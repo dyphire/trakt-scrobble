@@ -22,6 +22,7 @@ options.read_options(o, _, function() end)
 
 state = {}
 history = {}
+local scrobble = false
 local config_file = utils.join_path(mp.get_script_directory(), "config.json")
 local history_path = mp.command_native({"expand-path", o.history_path})
 
@@ -313,6 +314,7 @@ local function activation()
 end
 
 function get_progress()
+    if not state then return end
     local time_pos = state.pos or 0
     local duration = state.duration or 0
 
@@ -389,6 +391,7 @@ function start_scrobble(config, data, no_osd)
         else
             msg.info(message)
         end
+        scrobble = true
     end
 end
 
@@ -409,6 +412,7 @@ function stop_scrobble(config, data)
     else
         msg.info("Stopped scrobble on trakt.tv")
     end
+    scrobble = false
 end
 
 -- Query show
@@ -641,8 +645,10 @@ local function checkin_file()
 end
 
 -- Main function
-local function on_file_start(event)
-    if not o.enabled then return end
+local function trackt_scrobble(force)
+    if not o.enabled and not force then
+        return
+    end
 
     state = {}
     local status = init()
@@ -683,7 +689,7 @@ local function on_pause_callback(_, paused)
 end
 
 -- Register event
-mp.register_event("file-loaded", on_file_start)
+mp.register_event("file-loaded", trackt_scrobble)
 mp.observe_property("pause", "bool", on_pause_callback)
 mp.observe_property("time-pos", "number", on_time_pos)
 mp.register_event("end-file", function()
@@ -691,4 +697,13 @@ mp.register_event("end-file", function()
     mp.unobserve_property(on_pause_callback)
     on_pause_change(true)
     state = nil
+end)
+
+mp.register_script_message("trackt_scrobble", function()
+    if scrobble then
+        on_pause_change(true)
+        state = nil
+    else
+        trackt_scrobble(true)
+    end
 end)

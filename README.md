@@ -42,7 +42,7 @@ The current behaviors adopted by the plugin are:
 Some improvements that can be done are:
 
 - [ ] Start scrobbing only after x seconds of playback. This would avoid acidental scrobbles.
-- [ ] Allow the user to cancel a scrobble.
+- [x] Allow the user to cancel a scrobble.
 - [x] Allow a backup plan for when the show/movie isn't recognized.
 
 ## Contributing
