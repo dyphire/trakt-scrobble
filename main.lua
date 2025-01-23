@@ -8,10 +8,10 @@
 ]]
 
 
-local utils = require "mp.utils"
 local msg = require "mp.msg"
+local utils = require "mp.utils"
 local options = require "mp.options"
-require('guess')
+input_loaded, input = pcall(require, "mp.input")
 
 local o = {
     enabled = true,
@@ -20,10 +20,13 @@ local o = {
 
 options.read_options(o, _, function() end)
 
-local state = {}
-local history = {}
+state = {}
+history = {}
 local config_file = utils.join_path(mp.get_script_directory(), "config.json")
 local history_path = mp.command_native({"expand-path", o.history_path})
+
+require('guess')
+require('menu')
 
 -- Check if the path is a protocol (e.g., http://)
 local function is_protocol(path)
@@ -35,7 +38,7 @@ local function hex_to_char(x)
     return string.char(tonumber(x, 16))
 end
 
-local function url_encode(str)
+function url_encode(str)
     if str then
         str = str:gsub("([^%w%-%.%_%~])", function(c)
             return string.format("%%%02X", string.byte(c))
@@ -44,7 +47,7 @@ local function url_encode(str)
     return str
 end
 
-local function url_decode(str)
+function url_decode(str)
     if str ~= nil then
         str = str:gsub("^%a[%a%d-_]+://", "")
               :gsub("^%a[%a%d-_]+:\\?", "")
@@ -137,11 +140,16 @@ local function get_episode_number(fname, filename)
     end
 end
 
--- Send a message to the OSD
-local function send_message(msg, color, time)
+local function format_message(msg, color)
     local ass_start = mp.get_property_osd("osd-ass-cc/0")
     local ass_stop = mp.get_property_osd("osd-ass-cc/1")
-    mp.osd_message(ass_start .. "{\\1c&H" .. color .. "&}" .. msg .. ass_stop, time)
+    return ass_start .. "{\\1c&H" .. color .. "&}" .. msg .. ass_stop
+end
+
+-- Send a message to the OSD
+local function send_message(msg, color, time)
+    local msg = format_message(msg, color)
+    mp.osd_message(msg, time)
 end
 
 -- Read config file
@@ -166,7 +174,8 @@ local function write_config(file_path, data)
 end
 
 -- Write history file
-local function write_history(dir, fname)
+function write_history(dir, fname)
+    if not state.id then return end
     history[dir] = {}
     history[dir].fname = fname
     history[dir].type = state.type
@@ -180,7 +189,7 @@ local function write_history(dir, fname)
 end
 
 -- Send HTTP request using curl
-local function http_request(method, url, headers, body)
+function http_request(method, url, headers, body)
     local cmd = { "curl", "-s", "-X", method, url }
     if headers then
         for k, v in pairs(headers) do
@@ -303,7 +312,7 @@ local function activation()
     end
 end
 
-local function get_progress()
+function get_progress()
     local time_pos = state.pos or 0
     local duration = state.duration or 0
 
@@ -315,7 +324,7 @@ local function get_progress()
     return math.floor(progress)
 end
 
-local function get_data(progress)
+function get_data(progress)
     if not state then return end
     if state.season and state.episode then
         data = {
@@ -343,7 +352,7 @@ local function get_data(progress)
     return data
 end
 
-local function start_scrobble(config, data)
+function start_scrobble(config, data, no_osd)
     msg.info("Starting scrobbling to Trakt.tv")
     local res = http_request("POST", "https://api.trakt.tv/scrobble/start", {
         ["Content-Type"] = "application/json",
@@ -356,18 +365,34 @@ local function start_scrobble(config, data)
         msg.error("Check-in failed")
         return
     end
+    local message = nil
     if state and state.title then
         if state.season and state.episode then
-            send_message("Scrobbling on trakt.tv: " .. state.title .. " S" .. state.season .. "E" .. state.episode, "00FF00", 3)
-            msg.info("Scrobbling on trakt.tv: " .. state.title .. " S" .. state.season .. "E" .. state.episode)
+            message = "Scrobbling on trakt.tv: " .. state.title .. " S" .. state.season .. "E" .. state.episode
         else
-            send_message("Scrobbling on trakt.tv: " .. state.title, "00FF00", 3)
-            msg.info("Scrobbling on trakt.tv: " .. state.title)
+            message = "Scrobbling on trakt.tv: " .. state.title
+        end
+        if input_loaded and not no_osd then
+            local message1 = format_message(message, "00FF00")
+            local message2 = format_message("Incorrect scrobble? Press x to open the search menu", "FF8800")
+            message3 = message1 .. "\n" .. message2
+            mp.add_forced_key_binding("x", "search-trakt", function()
+                mp.osd_message("")
+                open_input_menu_get(state.filename, config)
+                stop_scrobble(config, data)
+            end)
+            mp.osd_message(message3, 9)
+            msg.info(message)
+        elseif not no_osd then
+            send_message(message, "00FF00", 3)
+            msg.info(message)
+        else
+            msg.info(message)
         end
     end
 end
 
-local function stop_scrobble(config, data)
+function stop_scrobble(config, data)
     msg.info("Stopping scrobbling to Trakt.tv")
     local res = http_request("POST", "https://api.trakt.tv/scrobble/stop", {
         ["Content-Type"] = "application/json",
@@ -402,7 +427,8 @@ local function query_search_show(name, season, episode, config)
 
     if year then
         for _, item in ipairs(res) do
-            if item.show.year == tonumber(year) then
+            if item.show.year == tonumber(year) or item.show.year == tonumber(year) + 1
+            or item.show.year == tonumber(year) - 1 then
                 state.type = "show"
                 state.title = item.show.title
                 state.slug = item.show.ids.slug
@@ -463,7 +489,8 @@ local function query_movie(movie, year, config)
         return
     end
     for _, item in ipairs(res) do
-        if item.movie.year == tonumber(year) then
+        if item.movie.year == tonumber(year) or item.movie.year == tonumber(year) + 1
+            or item.movie.year == tonumber(year) - 1 then
             state.type = "movie"
             state.title = item.movie.title
             state.id = item.movie.ids.trakt
@@ -565,6 +592,10 @@ local function checkin_file()
         end
     end
 
+    state.dir = dir
+    state.fname = fname
+    state.filename = title
+
     if history[dir] then
         local old_fname = history[dir].fname
         local old_type = history[dir].type
@@ -597,8 +628,15 @@ local function checkin_file()
         mp.add_timeout(1, function()
             start_scrobble(config, data)
         end)
+    elseif input_loaded then
+        local message = format_message("Automatic parsing of media titles failed.\n Press x to open the search menu", "FF8800")
+        mp.osd_message(message, 5)
+        mp.add_forced_key_binding("x", "search-trakt", function()
+            mp.osd_message("")
+            open_input_menu_get(state.filename, config)
+            stop_scrobble(config, data)
+        end)
     end
-
     write_history(dir, fname)
 end
 
@@ -634,7 +672,7 @@ local function on_pause_change(paused)
             stop_scrobble(config, data)
         else
             mp.add_timeout(1, function()
-                start_scrobble(config, data)
+                start_scrobble(config, data, true)
             end)
         end
     end
