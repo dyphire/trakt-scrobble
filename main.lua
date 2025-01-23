@@ -14,13 +14,16 @@ local options = require "mp.options"
 require('guess')
 
 local o = {
-    enabled = true
+    enabled = true,
+    history_path = "~~/trakt_history.json",
 }
 
 options.read_options(o, _, function() end)
 
 local state = {}
+local history = {}
 local config_file = utils.join_path(mp.get_script_directory(), "config.json")
+local history_path = mp.command_native({"expand-path", o.history_path})
 
 -- Check if the path is a protocol (e.g., http://)
 local function is_protocol(path)
@@ -90,6 +93,50 @@ local function get_parent_dir(path)
     return dir
 end
 
+local function split_by_numbers(filename)
+    local parts = {}
+    local pattern = "([^%d]*)(%d+)([^%d]*)"
+    for pre, num, post in string.gmatch(filename, pattern) do
+        table.insert(parts, {pre = pre, num = tonumber(num), post = post})
+    end
+    return parts
+end
+
+local function compare_filenames(fname1, fname2)
+    local parts1 = split_by_numbers(fname1)
+    local parts2 = split_by_numbers(fname2)
+
+    local min_len = math.min(#parts1, #parts2)
+
+    for i = 1, min_len do
+        local part1 = parts1[i]
+        local part2 = parts2[i]
+
+        if part1.pre ~= part2.pre then
+            return false
+        end
+
+        if part1.num ~= part2.num then
+            return part1.num, part2.num
+        end
+
+        if part1.post ~= part2.post then
+            return false
+        end
+    end
+
+    return false
+end
+
+local function get_episode_number(fname, filename)
+    local episode_num1, episode_num2 = compare_filenames(fname, filename)
+    if episode_num1 and episode_num2 then
+        return tonumber(episode_num1), tonumber(episode_num2)
+    else
+        return nil, nil
+    end
+end
+
 -- Send a message to the OSD
 local function send_message(msg, color, time)
     local ass_start = mp.get_property_osd("osd-ass-cc/0")
@@ -98,10 +145,9 @@ local function send_message(msg, color, time)
 end
 
 -- Read config file
-local function read_config()
-    local file = io.open(config_file, "r")
+local function read_config(file_path)
+    local file = io.open(file_path, "r")
     if not file then
-        msg.error("Error: config.json not found")
         return nil
     end
     local content = file:read("*a")
@@ -110,14 +156,27 @@ local function read_config()
 end
 
 -- Write config file
-local function write_config(config)
-    local file = io.open(config_file, "w")
+local function write_config(file_path, data)
+    local file = io.open(file_path, "w")
     if not file then
-        msg.error("Error: failed to write config.json")
         return
     end
-    file:write(utils.format_json(config))
+    file:write(utils.format_json(data))
     file:close()
+end
+
+-- Write history file
+local function write_history(dir, fname)
+    history[dir] = {}
+    history[dir].fname = fname
+    history[dir].type = state.type
+    history[dir].title = state.title
+    history[dir].id = state.id
+    if state.season and state.episode then
+        history[dir].season = state.season
+        history[dir].episode = state.episode
+    end
+    write_config(history_path, history)
 end
 
 -- Send HTTP request using curl
@@ -152,7 +211,7 @@ end
 
 -- Initialize and check config
 local function init()
-    local config = read_config()
+    local config = read_config(config_file)
     if not config then
         return 10
     end
@@ -167,7 +226,7 @@ end
 
 -- Generate device code
 local function device_code()
-    local config = read_config()
+    local config = read_config(config_file)
     if not config then
         return -1
     end
@@ -180,13 +239,13 @@ local function device_code()
         return -1
     end
     config.device_code = res.device_code
-    write_config(config)
+    write_config(config_file, config)
     return 0, res.user_code
 end
 
 -- Authenticate with device code
 local function auth()
-    local config = read_config()
+    local config = read_config(config_file)
     if not config then
         return -1
     end
@@ -215,7 +274,7 @@ local function auth()
         return -1
     end
     config.user_slug = user_res.user.ids.slug
-    write_config(config)
+    write_config(config_file, config)
     return 0
 end
 
@@ -344,6 +403,7 @@ local function query_search_show(name, season, episode, config)
     if year then
         for _, item in ipairs(res) do
             if item.show.year == tonumber(year) then
+                state.type = "show"
                 state.title = item.show.title
                 state.slug = item.show.ids.slug
                 state.id = item.show.ids.trakt
@@ -351,6 +411,7 @@ local function query_search_show(name, season, episode, config)
         end
     else
         local show = res[1].show
+        state.type = "show"
         state.title = show.title
         state.slug = show.ids.slug
         state.id = show.ids.trakt
@@ -378,6 +439,7 @@ local function query_search_show(name, season, episode, config)
             ["trakt-api-version"] = "2"
     })
     if not ep_res then
+        state.type = nil
         state.title = nil
         state.slug = nil
         state.id = nil
@@ -402,6 +464,7 @@ local function query_movie(movie, year, config)
     end
     for _, item in ipairs(res) do
         if item.movie.year == tonumber(year) then
+            state.type = "movie"
             state.title = item.movie.title
             state.id = item.movie.ids.trakt
             mp.osd_message("Found: " .. state.title, 3)
@@ -423,6 +486,7 @@ local function query_whatever(name, config)
         return
     end
     local movie = res[1].movie
+    state.type = "movie"
     state.title = movie.title
     state.id = movie.ids.trakt
     mp.osd_message("Found: " .. state.title, 3)
@@ -450,6 +514,10 @@ local function checkin_file()
     local filename = mp.get_property_native("filename/no-ext")
     local title = mp.get_property_native("media-title"):gsub("%.[^%.]+$", "")
     local thin_space = string.char(0xE2, 0x80, 0x89)
+    local fname = filename
+
+    history = read_config(history_path) or {}
+
     if not path then
         msg.info("No file loaded.")
         return
@@ -457,47 +525,81 @@ local function checkin_file()
 
     if is_protocol(path) then
         title = url_decode(title)
+        fname = title
     elseif #title < #filename then
         title = filename
     end
 
+    local dir = get_parent_dir(path)
+
     local video = mp.get_property_native("vid") and not mp.get_property_native("current-tracks/video/image") and
         not mp.get_property_native("current-tracks/video/albumart")
     if not video then return end
-
     state.duration = mp.get_property_number("duration", 0)
-
     local progress = get_progress()
     if not progress then return end
+    local config = read_config(config_file)
+    if not config then return end
 
     title = title:gsub(thin_space, " ")
     title = format_filename(title)
     local media_title, season, episode = title:match("^(.-)%s*[sS](%d+)[eE](%d+)")
     if not season then
         local media_title, episode = title:match("^(.-)%s*[eE](%d+)")
-        if episode then
-            local dir = get_parent_dir(path)
-            if dir then
-                local season = dir:match("[sS](%d+)") or dir:match("[sS]eason%s*(%d+)")
-                    or dir:match("(%d+)[nrdsth]+[_%.%s]%s*[sS]eason")
-                if season then
-                    title = media_title .. " S" .. season .. "E" .. episode
-                else
-                    title = media_title .. " S01" .. "E" .. episode
-                end
+        if episode and dir then
+            local season = dir:match("[sS](%d+)") or dir:match("[sS]eason%s*(%d+)")
+                or dir:match("(%d+)[nrdsth]+[_%.%s]%s*[sS]eason")
+            if season then
+                title = media_title .. " S" .. season .. "E" .. episode
+            else
+                title = media_title .. " S01" .. "E" .. episode
             end
         end
     end
 
-    local config = read_config()
-    if not config then return end
-    query_media(config, title)
+    if not dir then
+        if season then
+            dir = title .. " S" .. season
+        else
+            dir = title
+        end
+    end
+
+    if history[dir] then
+        local old_fname = history[dir].fname
+        local old_type = history[dir].type
+        local old_title = history[dir].title
+        local old_id = history[dir].id
+        local old_season = history[dir].season
+        local old_episode = history[dir].episode
+        local episode_num1, episode_num2 = get_episode_number(old_fname, fname)
+        if fname == old_fname then
+            episode_num1, episode_num2 = 0, 0
+        end
+        if episode_num1 and episode_num2 then
+            if old_type == "show" and old_season and old_episode then
+                state.type = old_type
+                state.title = old_title
+                state.id = old_id
+                state.season = old_season
+                state.episode = old_episode + episode_num2 - episode_num1
+                mp.osd_message("Found on trakt.tv: " .. state.title .. " S" .. state.season .. "E" .. state.episode, 3)
+                msg.info("Found on trakt.tv: " .. state.title .. " S" .. state.season .. "E" .. state.episode)
+            end
+        end
+    end
+
+    if not state.id then
+        query_media(config, title)
+    end
     local data = get_data(progress)
     if data then
         mp.add_timeout(1, function()
             start_scrobble(config, data)
         end)
     end
+
+    write_history(dir, fname)
 end
 
 -- Main function
@@ -523,7 +625,7 @@ local function on_time_pos(_, value)
 end
 
 local function on_pause_change(paused)
-    local config = read_config()
+    local config = read_config(config_file)
     if not config then return end
     local progress = get_progress()
     local data = get_data(progress)
