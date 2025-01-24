@@ -26,6 +26,7 @@ local scrobble = false
 local config_file = utils.join_path(mp.get_script_directory(), "config.json")
 local history_path = mp.command_native({"expand-path", o.history_path})
 
+base64 = require("base64")
 require('guess')
 require('menu')
 
@@ -225,10 +226,11 @@ local function init()
     if not config then
         return 10
     end
-    if not config.client_id or not config.client_secret or #config.client_id ~= 64 or #config.client_secret ~= 64 then
+    if not base64.decode(config.client_id) or not base64.decode(config.client_secret)
+    or #base64.decode(config.client_id) ~= 64 or #base64.decode(config.client_secret) ~= 64 then
         return 10
     end
-    if not config.access_token or #config.access_token ~= 64 then
+    if not base64.decode(config.access_token) or #base64.decode(config.access_token) ~= 64 then
         return 11
     end
     return 0
@@ -243,7 +245,7 @@ local function device_code()
     local res = http_request("POST", "https://api.trakt.tv/oauth/device/code", {
         ["Content-Type"] = "application/json"
     }, {
-        client_id = config.client_id
+        client_id = base64.decode(config.client_id)
     })
     if not res then
         return -1
@@ -262,22 +264,22 @@ local function auth()
     local res = http_request("POST", "https://api.trakt.tv/oauth/device/token", {
         ["Content-Type"] = "application/json"
     }, {
-        client_id = config.client_id,
-        client_secret = config.client_secret,
+        client_id = base64.decode(config.client_id),
+        client_secret = base64.decode(config.client_secret),
         code = config.device_code
     })
     if not res or not res.access_token then
         return -1
     end
-    config.access_token = res.access_token
-    config.refresh_token = res.refresh_token
+    config.access_token = base64.encode(res.access_token)
+    config.refresh_token  = base64.encode(res.refresh_token)
     config.device_code = nil
     config.today = os.date("%Y-%m-%d")
 
     -- Get user info
     local user_res = http_request("GET", "https://api.trakt.tv/users/settings", {
-        ["trakt-api-key"] = config.client_id,
-        ["Authorization"] = "Bearer " .. config.access_token,
+        ["trakt-api-key"] = base64.decode(config.client_id),
+        ["Authorization"] = "Bearer " .. base64.decode(config.access_token),
         ["trakt-api-version"] = "2"
     })
     if not user_res or not user_res.user then
@@ -358,8 +360,8 @@ function start_scrobble(config, data, no_osd)
     msg.info("Starting scrobbling to Trakt.tv")
     local res = http_request("POST", "https://api.trakt.tv/scrobble/start", {
         ["Content-Type"] = "application/json",
-        ["trakt-api-key"] = config.client_id,
-        ["Authorization"] = "Bearer " .. config.access_token,
+        ["trakt-api-key"] = base64.decode(config.client_id),
+        ["Authorization"] = "Bearer " .. base64.decode(config.access_token),
         ["trakt-api-version"] = "2"
     }, data)
     if not res then
@@ -399,8 +401,8 @@ function stop_scrobble(config, data)
     msg.info("Stopping scrobbling to Trakt.tv")
     local res = http_request("POST", "https://api.trakt.tv/scrobble/stop", {
         ["Content-Type"] = "application/json",
-        ["trakt-api-key"] = config.client_id,
-        ["Authorization"] = "Bearer " .. config.access_token,
+        ["trakt-api-key"] = base64.decode(config.client_id),
+        ["Authorization"] = "Bearer " .. base64.decode(config.access_token),
         ["trakt-api-version"] = "2"
     }, data)
     if not res then
@@ -421,7 +423,7 @@ local function query_search_show(name, season, episode, config)
     if year then name = title end
     local url = string.format("https://api.trakt.tv/search/show?query=%s", url_encode(name))
     res = http_request("GET", url, {
-        ["trakt-api-key"] = config.client_id,
+        ["trakt-api-key"] = base64.decode(config.client_id),
         ["trakt-api-version"] = "2"
     })
     if not res or #res == 0 then
@@ -456,7 +458,7 @@ local function query_search_show(name, season, episode, config)
 
     season_res = http_request("GET", string.format("https://api.trakt.tv/shows/%s/seasons/%s",
     state.slug, season), {
-            ["trakt-api-key"] = config.client_id,
+            ["trakt-api-key"] = base64.decode(config.client_id),
             ["trakt-api-version"] = "2"
     })
     if not season_res then
@@ -465,7 +467,7 @@ local function query_search_show(name, season, episode, config)
 
     ep_res = http_request("GET", string.format("https://api.trakt.tv/shows/%s/seasons/%s/episodes/%s",
         state.slug, season, episode), {
-            ["trakt-api-key"] = config.client_id,
+            ["trakt-api-key"] = base64.decode(config.client_id),
             ["trakt-api-version"] = "2"
     })
     if not ep_res then
@@ -485,7 +487,7 @@ end
 local function query_movie(movie, year, config)
     local url = string.format("https://api.trakt.tv/search/movie?query=%s", url_encode(movie))
     local res = http_request("GET", url, {
-        ["trakt-api-key"] = config.client_id,
+        ["trakt-api-key"] = base64.decode(config.client_id),
         ["trakt-api-version"] = "2"
     })
     if not res or #res == 0 then
@@ -509,7 +511,7 @@ end
 local function query_whatever(name, config)
     local url = string.format("https://api.trakt.tv/search/movie?query=%s", url_encode(name))
     local res = http_request("GET", url, {
-        ["trakt-api-key"] = config.client_id,
+        ["trakt-api-key"] = base64.decode(config.client_id),
         ["trakt-api-version"] = "2"
     })
     if not res or #res == 0 then

@@ -3,7 +3,7 @@ local msg = require "mp.msg"
 local function search_episodes(slug, season, type, id, title, config)
     local url = string.format("https://api.trakt.tv/shows/%s/seasons/%s/episodes", slug, season)
     local res = http_request("GET", url, {
-            ["trakt-api-key"] = config.client_id,
+            ["trakt-api-key"] = base64.decode(config.client_id),
             ["trakt-api-version"] = "2"
     })
     if not res or #res == 0 then
@@ -37,7 +37,7 @@ end
 local function search_season(slug, type, id, title, config)
     local url = string.format("https://api.trakt.tv/shows/%s/seasons", slug)
     local res = http_request("GET", url, {
-        ["trakt-api-key"] = config.client_id,
+        ["trakt-api-key"] = base64.decode(config.client_id),
         ["trakt-api-version"] = "2"
     })
     if not res or #res == 0 then
@@ -68,7 +68,7 @@ local function search_show(name, config, page)
     local url = string.format("https://api.trakt.tv/search/show?query=%s&page=%d&limit=%s",
         url_encode(name), page, limit)
     local res = http_request("GET", url, {
-        ["trakt-api-key"] = config.client_id,
+        ["trakt-api-key"] = base64.decode(config.client_id),
         ["trakt-api-version"] = "2"
     })
     if not res or #res == 0 then
@@ -107,7 +107,7 @@ local function search_movie(name, config, page)
     local url = string.format("https://api.trakt.tv/search/movie?query=%s&page=%d&limit=%s",
         url_encode(name), page, limit)
     local res = http_request("GET", url, {
-        ["trakt-api-key"] = config.client_id,
+        ["trakt-api-key"] = base64.decode(config.client_id),
         ["trakt-api-version"] = "2"
     })
     if not res or #res == 0 then
