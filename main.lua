@@ -714,15 +714,17 @@ local function trackt_scrobble(force)
             send_message("Authentication failed. Please re-login.", "FF0000", 5)
             return
         end
+        mp.observe_property("pause", "bool", on_pause_callback)
+        mp.observe_property("time-pos", "number", on_time_pos)
         checkin_file()
     end
 end
 
-local function on_time_pos(_, value)
+function on_time_pos(_, value)
     state.pos = value
 end
 
-local function on_pause_change(paused)
+function on_pause_change(paused)
     local config = read_config(config_file)
     if not config then return end
     local progress = get_progress()
@@ -738,14 +740,12 @@ local function on_pause_change(paused)
     end
 end
 
-local function on_pause_callback(_, paused)
+function on_pause_callback(_, paused)
     on_pause_change(paused)
 end
 
 -- Register event
 mp.register_event("file-loaded", trackt_scrobble)
-mp.observe_property("pause", "bool", on_pause_callback)
-mp.observe_property("time-pos", "number", on_time_pos)
 mp.register_event("end-file", function()
     mp.unobserve_property(on_time_pos)
     mp.unobserve_property(on_pause_callback)
