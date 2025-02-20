@@ -226,11 +226,11 @@ local function init()
     if not config then
         return 10
     end
-    if not base64.decode(config.client_id) or not base64.decode(config.client_secret)
+    if not config.client_id or not config.client_secret
     or #base64.decode(config.client_id) ~= 64 or #base64.decode(config.client_secret) ~= 64 then
         return 10
     end
-    if not base64.decode(config.access_token) or #base64.decode(config.access_token) ~= 64 then
+    if not config.access_token or #base64.decode(config.access_token) ~= 64 then
         return 11
     end
     return 0
@@ -744,7 +744,9 @@ function on_pause_callback(_, paused)
 end
 
 -- Register event
-mp.register_event("file-loaded", trackt_scrobble)
+mp.register_event("file-loaded", function()
+    trackt_scrobble(false)
+end)
 mp.register_event("end-file", function()
     mp.unobserve_property(on_time_pos)
     mp.unobserve_property(on_pause_callback)
