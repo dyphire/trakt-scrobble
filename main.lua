@@ -587,19 +587,13 @@ local function query_media(config, media)
 end
 
 -- Checkin function
-local function checkin_file()
-    local path = mp.get_property_native("path")
+local function checkin_file(path)
     local filename = mp.get_property_native("filename/no-ext")
     local title = mp.get_property_native("media-title"):gsub("%.[^%.]+$", "")
     local thin_space = string.char(0xE2, 0x80, 0x89)
     local fname = filename
 
     history = read_config(history_path) or {}
-
-    if not path then
-        msg.info("No file loaded.")
-        return
-    end
 
     if is_protocol(path) then
         title = url_decode(title)
@@ -610,9 +604,6 @@ local function checkin_file()
 
     local dir = get_parent_dir(path)
 
-    local video = mp.get_property_native("vid") and not mp.get_property_native("current-tracks/video/image") and
-        not mp.get_property_native("current-tracks/video/albumart")
-    if not video then return end
     state.duration = mp.get_property_number("duration", 0)
     local progress = get_progress()
     if not progress then return end
@@ -697,6 +688,18 @@ local function trackt_scrobble(force)
         return
     end
 
+    local path = mp.get_property_native("path")
+    if not path then
+        return
+    end
+
+    local video = mp.get_property_native("current-tracks/video")
+    local fps = mp.get_property_number("container-fps", 0)
+    local duration = mp.get_property_number("duration", 0)
+    if not video or video["image"] or video["albumart"] or fps < 23 or duration < 60 then
+        return
+    end
+
     state = {}
     local status = init()
     local config = read_config(config_file)
@@ -715,7 +718,7 @@ local function trackt_scrobble(force)
         end
         mp.observe_property("pause", "bool", on_pause_callback)
         mp.observe_property("time-pos", "number", on_time_pos)
-        checkin_file()
+        checkin_file(path)
     end
 end
 
