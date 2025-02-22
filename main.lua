@@ -16,6 +16,8 @@ input_loaded, input = pcall(require, "mp.input")
 local o = {
     enabled = true,
     history_path = "~~/trakt_history.json",
+    --slice long filenames, and how many chars to show
+    max_title_length = 100,
 }
 
 options.read_options(o, _, function() end)
@@ -63,6 +65,39 @@ function url_decode(str)
     else
         return
     end
+end
+
+-- from http://lua-users.org/wiki/LuaUnicode
+local UTF8_PATTERN = '[%z\1-\127\194-\244][\128-\191]*'
+
+-- return a substring based on utf8 characters
+-- like string.sub, but negative index is not supported
+local function utf8_sub(s, i, j)
+    if i > j then
+        return s
+    end
+
+    local t = {}
+    local idx = 1
+    for char in s:gmatch(UTF8_PATTERN) do
+        if i <= idx and idx <= j then
+            local width = #char > 2 and 2 or 1
+            idx = idx + width
+            t[#t + 1] = char
+        end
+    end
+    return table.concat(t)
+end
+
+function clip_title(title)
+    if not title then
+        return title
+    end
+    local title_clip = utf8_sub(title, 1, o.max_title_length)
+    if title ~= title_clip then
+        title = title_clip .. "..."
+    end
+    return title
 end
 
 local function normalize(path)
