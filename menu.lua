@@ -23,6 +23,7 @@ local function search_episodes(slug, season, type, id, title, config)
                 local progress = get_progress()
                 local data = get_data(progress)
                 if data then
+                    enabled = true
                     start_scrobble(config, data)
                 end
                 write_history(state.dir, state.fname)
@@ -105,8 +106,6 @@ local function search_trakt(name, class, config, page)
                 search_trakt(name, class, config, page)
             end
         })
-    else
-        msg.info("No more pages available.")
     end
     mp.add_timeout(0.1, function()
         open_menu_select(items)

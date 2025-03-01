@@ -23,7 +23,7 @@ local o = {
 options.read_options(o, _, function() end)
 
 state = {}
-history = {}
+enabled = o.enabled
 local scrobble = false
 local config_file = utils.join_path(mp.get_script_directory(), "config.json")
 local history_path = mp.command_native({"expand-path", o.history_path})
@@ -177,6 +177,47 @@ local function get_episode_number(fname, filename)
     end
 end
 
+local function parse_title(path)
+    local dir = get_parent_dir(path)
+    local filename = mp.get_property_native("filename/no-ext")
+    local title = mp.get_property_native("media-title"):gsub("%.[^%.]+$", "")
+    local thin_space = string.char(0xE2, 0x80, 0x89)
+    local fname = filename
+
+    if is_protocol(path) then
+        title = url_decode(title)
+        fname = title
+    elseif #title < #filename then
+        title = filename
+    end
+
+    title = title:gsub(thin_space, " ")
+    title = format_filename(title)
+    local media_title, season, episode = title:match("^(.-)%s*[sS](%d+)[eE](%d+)")
+    if not season then
+        local media_title, episode = title:match("^(.-)%s*[eE](%d+)")
+        if episode and dir then
+            local season = dir:match("[sS](%d+)") or dir:match("[sS]eason%s*(%d+)")
+                or dir:match("(%d+)[nrdsth]+[_%.%s]%s*[sS]eason")
+            if season then
+                title = media_title .. " S" .. season .. "E" .. episode
+            else
+                title = media_title .. " S01" .. "E" .. episode
+            end
+        end
+    end
+
+    if not dir then
+        if season then
+            dir = title .. " S" .. season
+        else
+            dir = title
+        end
+    end
+
+    return dir, fname, title
+end
+
 local function format_message(msg, color)
     local ass_start = mp.get_property_osd("osd-ass-cc/0")
     local ass_stop = mp.get_property_osd("osd-ass-cc/1")
@@ -212,6 +253,7 @@ end
 
 -- Write history file
 function write_history(dir, fname)
+    local history = read_config(history_path) or {}
     if not state.id then return end
     history[dir] = {}
     history[dir].fname = fname
@@ -442,7 +484,7 @@ function start_scrobble(config, data, no_osd)
     local res = http_request("POST", "https://api.trakt.tv/scrobble/start", {
         ["Content-Type"] = "application/json",
         ["trakt-api-key"] = base64.decode(config.client_id),
-        ["Authorization"] = "Bearer " .. base64.decode(config.access_token),
+        ["Authorization"] = "Bearer " .. config.access_token and base64.decode(config.access_token),
         ["trakt-api-version"] = "2"
     }, data)
     if not res then
@@ -482,7 +524,7 @@ function stop_scrobble(config, data)
     local res = http_request("POST", "https://api.trakt.tv/scrobble/stop", {
         ["Content-Type"] = "application/json",
         ["trakt-api-key"] = base64.decode(config.client_id),
-        ["Authorization"] = "Bearer " .. base64.decode(config.access_token),
+        ["Authorization"] = "Bearer " .. config.access_token and base64.decode(config.access_token),
         ["trakt-api-version"] = "2"
     }, data)
     if not res then
@@ -623,56 +665,19 @@ end
 
 -- Checkin function
 local function checkin_file(path)
-    local filename = mp.get_property_native("filename/no-ext")
-    local title = mp.get_property_native("media-title"):gsub("%.[^%.]+$", "")
-    local thin_space = string.char(0xE2, 0x80, 0x89)
-    local fname = filename
-
-    history = read_config(history_path) or {}
-
-    if is_protocol(path) then
-        title = url_decode(title)
-        fname = title
-    elseif #title < #filename then
-        title = filename
-    end
-
-    local dir = get_parent_dir(path)
+    local config = read_config(config_file)
+    if not config then return end
 
     state.duration = mp.get_property_number("duration", 0)
     local progress = get_progress()
     if not progress then return end
-    local config = read_config(config_file)
-    if not config then return end
 
-    title = title:gsub(thin_space, " ")
-    title = format_filename(title)
-    local media_title, season, episode = title:match("^(.-)%s*[sS](%d+)[eE](%d+)")
-    if not season then
-        local media_title, episode = title:match("^(.-)%s*[eE](%d+)")
-        if episode and dir then
-            local season = dir:match("[sS](%d+)") or dir:match("[sS]eason%s*(%d+)")
-                or dir:match("(%d+)[nrdsth]+[_%.%s]%s*[sS]eason")
-            if season then
-                title = media_title .. " S" .. season .. "E" .. episode
-            else
-                title = media_title .. " S01" .. "E" .. episode
-            end
-        end
-    end
-
-    if not dir then
-        if season then
-            dir = title .. " S" .. season
-        else
-            dir = title
-        end
-    end
-
+    local dir, fname, title  = parse_title(path)
     state.dir = dir
     state.fname = fname
     state.filename = title
 
+    local history = read_config(history_path) or {}
     if history[dir] then
         local old_fname = history[dir].fname
         local old_type = history[dir].type
@@ -735,7 +740,6 @@ local function trackt_scrobble(force)
         return
     end
 
-    state = {}
     local status = init()
     local config = read_config(config_file)
 
@@ -751,8 +755,6 @@ local function trackt_scrobble(force)
             send_message("Authentication failed. Please re-login.", "FF0000", 5)
             return
         end
-        mp.observe_property("pause", "bool", on_pause_callback)
-        mp.observe_property("time-pos", "number", on_time_pos)
         checkin_file(path)
     end
 end
@@ -762,6 +764,7 @@ function on_time_pos(_, value)
 end
 
 function on_pause_change(paused)
+    if not enabled then return end
     local config = read_config(config_file)
     if not config then return end
     local progress = get_progress()
@@ -783,8 +786,12 @@ end
 
 -- Register event
 mp.register_event("file-loaded", function()
-    trackt_scrobble(false)
+    state = {}
+    mp.observe_property("pause", "bool", on_pause_callback)
+    mp.observe_property("time-pos", "number", on_time_pos)
+    trackt_scrobble(enabled)
 end)
+
 mp.register_event("end-file", function()
     mp.unobserve_property(on_time_pos)
     mp.unobserve_property(on_pause_callback)
@@ -792,11 +799,33 @@ mp.register_event("end-file", function()
     state = nil
 end)
 
-mp.register_script_message("trackt_scrobble", function()
+mp.register_script_message("search-menu", function()
+    local config = read_config(config_file)
+    if not config then
+        mp.osd_message("Failed to read config file", 3)
+        msg.error("Failed to read config file")
+        return
+    end
+
+    local path = mp.get_property_native("path")
+    if not state.dir or not state.fname or not state.filename then
+        local dir, fname, title  = parse_title(path)
+        state.dir = dir
+        state.fname = fname
+        state.filename = title
+    end
+    local title = state.filename or ""
+    open_input_menu_get(title, config)
+end)
+
+mp.register_script_message("toggle-scrobble", function()
     if scrobble then
+        mp.osd_message("Trakt scrobbling disabled", 3)
+        msg.info("Trakt scrobbling disabled")
         on_pause_change(true)
-        state = nil
+        enabled = false
     else
-        trackt_scrobble(true)
+        enabled = true
+        trackt_scrobble(enabled)
     end
 end)
