@@ -29,9 +29,9 @@ local scrobble = false
 local config_file = utils.join_path(mp.get_script_directory(), "config.json")
 local history_path = mp.command_native({"expand-path", o.history_path})
 
-base64 = require("base64")
-require('guess')
-require('menu')
+base64 = require("modules/base64")
+require('modules/guess')
+require('modules/menu')
 
 -- Check if the path is a protocol (e.g., http://)
 local function is_protocol(path)
