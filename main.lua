@@ -371,6 +371,8 @@ local function auth()
     config.access_token = base64.encode(res.access_token)
     config.refresh_token  = base64.encode(res.refresh_token)
     config.device_code = nil
+    config.created_at = res.created_at
+    config.expires_in = res.expires_in
     config.today = os.date("%Y-%m-%d")
 
     -- Get user info
@@ -430,6 +432,8 @@ local function refresh_token(config)
 
     config.access_token = base64.encode(res.access_token)
     config.refresh_token = base64.encode(res.refresh_token)
+    config.created_at = res.created_at
+    config.expires_in = res.expires_in
     config.today = os.date("%Y-%m-%d")
 
     write_config(config_file, config)
@@ -442,6 +446,16 @@ end
 local function check_access_token(config)
     if not next(config) or not config.access_token or not config.refresh_token then
         return -1
+    end
+
+    if config.created_at and config.expires_in then
+        local time = os.time()
+        if time - config.created_at >= config.expires_in then
+            msg.warn("Access token was expired, attempting to refresh.")
+            return refresh_token(config)
+        else
+            return 0
+        end
     end
 
     local res = http_request("GET", "https://api.trakt.tv/users/settings", {
