@@ -32,6 +32,7 @@ o = {
 options.read_options(o, _, function() end)
 
 state = {}
+config = {}
 enabled = o.enabled
 local scrobble = false
 
@@ -256,7 +257,7 @@ end
 local function read_config(file_path)
     local file = io.open(file_path, "r")
     if not file then
-        return nil
+        return {}
     end
     local content = file:read("*a")
     file:close()
@@ -324,14 +325,12 @@ end
 -- Initialize and check config
 local function init()
     config = read_config(config_file)
-    if not config then
-        return 10
-    end
     if not o.client_id or not o.client_secret
     or #base64.decode(o.client_id) ~= 64 or #base64.decode(o.client_secret) ~= 64 then
         return 10
     end
-    if not config.access_token or #base64.decode(config.access_token) ~= 64 then
+    if not next(config) or not config.access_token
+    or #base64.decode(config.access_token) ~= 64 then
         return 11
     end
     return 0
@@ -340,9 +339,6 @@ end
 -- Generate device code
 local function device_code()
     config = read_config(config_file)
-    if not config then
-        return -1
-    end
     local res = http_request("POST", "https://api.trakt.tv/oauth/device/code", {
         ["Content-Type"] = "application/json"
     }, {
@@ -359,7 +355,7 @@ end
 -- Authenticate with device code
 local function auth()
     config = read_config(config_file)
-    if not config then
+    if not next(config) then
         return -1
     end
     local res = http_request("POST", "https://api.trakt.tv/oauth/device/token", {
@@ -444,7 +440,7 @@ end
 
 -- Check if access_token is expired
 local function check_access_token(config)
-    if not config or not config.access_token or not config.refresh_token then
+    if not next(config) or not config.access_token or not config.refresh_token then
         return -1
     end
 
@@ -690,7 +686,7 @@ end
 -- Checkin function
 local function checkin_file(path)
     config = read_config(config_file)
-    if not config then return end
+    if not next(config) then return end
 
     state.duration = mp.get_property_number("duration", 0)
     local progress = get_progress()
@@ -789,7 +785,7 @@ end
 
 function on_pause_change(paused)
     if not enabled then return end
-    if not config then return end
+    if not next(config) then return end
     local progress = get_progress()
     local data = get_data(progress)
     if data then
@@ -828,7 +824,7 @@ end)
 
 mp.register_script_message("search-menu", function()
     config = read_config(config_file)
-    if not config then
+    if not next(config) then
         mp.osd_message("Failed to read config file", 3)
         msg.error("Failed to read config file")
         return
